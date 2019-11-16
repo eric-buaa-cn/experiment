@@ -72,6 +72,21 @@ void array_rotation3(int* arr, int d, int size) {
     }
 }
 
+void reverse_array(int* arr, int begin, int end) {
+    while (begin < end) {
+        std::swap(arr[begin], arr[end-1]);
+        ++begin;
+        --end;
+    }
+}
+
+// time: O(n), space: O(1)
+void array_rotation4(int* arr, int d, int size) {
+    reverse_array(arr, 0, d);
+    reverse_array(arr, d, size);
+    reverse_array(arr, 0, size);
+}
+
 int main() {
     int arr[] = {1, 2, 3, 4, 5, 6, 7};
     int n = sizeof(arr)/sizeof(arr[0]);
@@ -103,6 +118,16 @@ int main() {
             arr_cpy[i] = arr[i];
         }
         array_rotation3(arr_cpy, d, n);
+        print_array(arr_cpy, n);
+        delete [] arr_cpy;
+    }
+
+    {
+        int* arr_cpy = new int[n];
+        for (int i = 0; i < n; ++i) {
+            arr_cpy[i] = arr[i];
+        }
+        array_rotation4(arr_cpy, d, n);
         print_array(arr_cpy, n);
         delete [] arr_cpy;
     }
