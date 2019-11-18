@@ -143,31 +143,23 @@ public:
 
     static void PostOrderWithoutRecursive(Node *node, NodeHandler func) {
         std::stack<Node*> stack;
-        Node *last_handled = nullptr;
+        Node *last_visited = nullptr;
 
-        while (node) {
-            stack.push(node);
-            node = node->left;
-        }
-
-        while (!stack.empty()) {
-            node = stack.top();
-            stack.pop();
-
-            if (node->right == nullptr || node->right == last_handled) {
-                func(node);
-                last_handled = node;
-            } else {
+        while (!stack.empty() || node) {
+            if (node) {
                 stack.push(node);
-                node = node->right;
-
-                while (node) {
-                    stack.push(node);
-                    node = node->left;
+                node = node->left;
+            } else {
+                Node *top = stack.top();
+                if (top->right == nullptr || top->right == last_visited) {
+                    func(top);
+                    stack.pop();
+                    last_visited = top;
+                } else {
+                    node = top->right;
                 }
             }
         }
-
     }
 
 private:
