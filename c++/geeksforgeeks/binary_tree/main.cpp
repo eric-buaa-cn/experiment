@@ -162,9 +162,37 @@ public:
         }
     }
 
+    Node* root() const {
+        return root_;
+    }
+
 private:
     Node *root_;
 };
+
+bool is_bst(BST tree) {
+    BST::Node *node = tree.root();
+    std::stack<BST::Node*> s;
+    int last_value = std::numeric_limits<int>::min();
+
+    while (!s.empty() || node) {
+        if (node) {
+            s.push(node);
+            node = node->left;
+        } else {
+            node = s.top();
+            s.pop();
+            if (node->value < last_value) {
+                return false;
+            }
+            last_value = node->value;
+
+            node = node->right;
+        }
+    }
+
+    return true;
+}
 
 int main() {
     BST tree;
@@ -178,5 +206,7 @@ int main() {
     tree.preOrderPrint(false);
     tree.inOrderPrint(false);
     tree.postOrderPrint(false);
+
+    std::cout << "is_bst:" << is_bst(tree) << std::endl;
     return 0;
 }
