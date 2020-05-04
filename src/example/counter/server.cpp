@@ -33,6 +33,7 @@ DEFINE_int32(port, 8100, "Listen port of this peer");
 DEFINE_int32(snapshot_interval, 30, "Interval between each snapshot");
 DEFINE_string(conf, "", "Initial configuration of the replication group");
 DEFINE_string(data_path, "./data", "Path of data stored on");
+DEFINE_string(rocksdb_path, "./rocksdb", "Path of rocksdb data stored on");
 DEFINE_string(group, "Counter", "Id of the replication group");
 
 namespace example {
@@ -81,9 +82,10 @@ namespace example {
                 // init rocksdb
                 rocksdb::Options db_options;
                 db_options.create_if_missing = true;
-                rocksdb::Status status = rocksdb::DB::Open(db_options, FLAGS_data_path, &db_);
+                rocksdb::Status status = rocksdb::DB::Open(db_options, FLAGS_rocksdb_path, &db_);
                 if (!status.ok()) {
-                    LOG(ERROR) << "fail to open rocksdb " << FLAGS_data_path;
+                    LOG(ERROR) << "on_snapshot_load fail to open rocksdb " << FLAGS_rocksdb_path
+                        << ", " << status.ToString();
                     return -1;
                 }
 
@@ -221,16 +223,16 @@ namespace example {
                     // operation.
                     const int64_t prev = _value.fetch_add(delta_value, 
                                                           butil::memory_order_relaxed);
-                    std::string key {"value"};
-                    std::string value = butil::string_printf("%ld", (prev + delta_value));
-                    // save to rocksdb
-                    rocksdb::Status status = db_->Put(rocksdb::WriteOptions(), key, value);
-                    if (!status.ok()) {
-                        LOG(FATAL) << "fail to write to rocksdb";
-                    }
-                    else {
-                        LOG(INFO) << "apply value " << value << " into rocksdb";
-                    }
+                    //std::string key {"value"};
+                    //std::string value = butil::string_printf("%ld", (prev + delta_value));
+                    //// save to rocksdb
+                    //rocksdb::Status status = db_->Put(rocksdb::WriteOptions(), key, value);
+                    //if (!status.ok()) {
+                    //    LOG(FATAL) << "fail to write to rocksdb";
+                    //}
+                    //else {
+                    //    LOG(INFO) << "apply value " << value << " into rocksdb";
+                    //}
 
                     if (response) {
                         response->set_success(true);
@@ -247,7 +249,7 @@ namespace example {
             }
 
             struct SnapshotArg {
-                rocksdb::Iterator* iter;
+                int64_t value;
                 braft::SnapshotWriter* writer;
                 braft::Closure* done;
             };
@@ -255,67 +257,48 @@ namespace example {
             static void *save_snapshot(void* arg) {
                 SnapshotArg* sa = (SnapshotArg*) arg;
                 std::unique_ptr<SnapshotArg> arg_guard(sa);
-                std::unique_ptr<rocksdb::Iterator> iter_guard(sa->iter);
-                // Serialize StateMachine to the snapshot
                 brpc::ClosureGuard done_guard(sa->done);
+                auto* done = sa->done;
                 std::string snapshot_path = sa->writer->get_path() + "/data.sst";
                 LOG(INFO) << "Saving snapshot to " << snapshot_path;
 
                 rocksdb::Options options;
-                rocksdb::SstFileWriter sfw(rocksdb::EnvOptions(), options);
+                rocksdb::SstFileWriter sfw{rocksdb::EnvOptions(), options};
                 rocksdb::Status status = sfw.Open(snapshot_path);
                 if (!status.ok()) {
-                    LOG(ERROR) << "fail to open sst file writer " << snapshot_path;
+                    done->status().set_error(EINVAL, "fail to open sst file");
+                    return nullptr;
                 }
 
-                rocksdb::Iterator* iter = sa->iter;
-                for (;iter->Valid(); iter->Next()) {
-                    status = sfw.Put(iter->key(), iter->value());
-                    if (!status.ok()) {
-                        LOG(ERROR) << "fail to put sst file writer ";
-                    }
-                    else {
-                        LOG(INFO) << "write key to snapshot " << iter->key().ToString() << ":"
-                            << iter->value().ToString();
-                    }
+                std::string key{"value"};
+                std::string value_str = butil::string_printf("%ld", sa->value);
+                status = sfw.Put(key, value_str);
+                if (!status.ok()) {
+                    done->status().set_error(EINVAL, "fail to put value to sst file");
+                    return nullptr;
                 }
 
                 status = sfw.Finish();
                 if (!status.ok()) {
-                    LOG(ERROR) << "fail to finish sst file writer " << status.ToString();
+                    done->status().set_error(EINVAL, "fail to finish sst file");
+                    return nullptr;
                 }
 
-                ////// Use protobuf to store the snapshot for backward compatibility.
-                ////Snapshot s;
-                ////s.set_value(sa->value);
-                ////braft::ProtoBufFile pb_file(snapshot_path);
-                ////if (pb_file.save(&s, true) != 0)  {
-                ////    sa->done->status().set_error(EIO, "Fail to save pb_file");
-                ////    return NULL;
-                ////}
                 // Snapshot is a set of files in raft. Add the only file into the
                 // writer here.
                 if (sa->writer->add_file("data.sst") != 0) {
-                    sa->done->status().set_error(EIO, "Fail to add file to writer");
-                    return NULL;
+                    done->status().set_error(EIO, "Fail to add file to writer");
+                    return nullptr;
                 }
-                return NULL;
+                return nullptr;
             }
 
             void on_snapshot_save(braft::SnapshotWriter* writer, braft::Closure* done) {
                 // Save current StateMachine in memory and starts a new bthread to avoid
                 // blocking StateMachine since it's a bit slow to write data to disk
                 // file.
-                rocksdb::ReadOptions read_options;
-                read_options.prefix_same_as_start = false;
-                read_options.total_order_seek = true;
-
-                // note: iter should be delete in the following bthread.
-                rocksdb::Iterator* iter = db_->NewIterator(read_options);
-                iter->SeekToFirst();
-
                 SnapshotArg* arg = new SnapshotArg;
-                arg->iter = iter;
+                arg->value = _value;
                 arg->writer = writer;
                 arg->done = done;
                 bthread_t tid;
@@ -329,41 +312,35 @@ namespace example {
                 ///    LOG(ERROR) << "Fail to find `data' on " << reader->get_path();
                 ///    return -1;
                 ///}
-                std::string snapshot_path = reader->get_path() + "/data.sst";
+                std::string snapshot_path = reader->get_path();
+                LOG(INFO) << "on_snapshot_load path:" << snapshot_path;
 
                 std::vector<std::string> files;
                 reader->list_files(&files);
-
                 if (std::find(std::begin(files), std::end(files), "data.sst") == std::end(files)) {
                     LOG(INFO) << "snapshot data.sst not found";
                     return 0;
                 }
 
                 rocksdb::Status status;
-                //// clear rocksdb
-                //std::string start_key(1, 0x00);
-                //std::string end_key(1, 0xFF);
+                // clear rocksdb
+                std::string start_key(1, 0x00);
+                std::string end_key(1, 0xFF);
 
-                //status = db_->DeleteRange(rocksdb::WriteOptions(),
-                //                                          nullptr, start_key, end_key);
-                //if (!status.ok()) {
-                //    LOG(ERROR) << "fail to delete range";
-                //    return -1;
-                //}
+                status = db_->DeleteRange(rocksdb::WriteOptions(),
+                                          nullptr, start_key, end_key);
+                if (!status.ok()) {
+                    LOG(ERROR) << "fail to delete range " << status.ToString();
+                    return -1;
+                }
 
-                //std::vector<std::string> filepaths;
-                //filepaths.push_back(snapshot_path);
-                //rocksdb::IngestExternalFileOptions ifo;
-                //status = db_->IngestExternalFile(filepaths, ifo);
-                //if (!status.ok()) {
-                //    LOG(ERROR) << "fail to ingest external file " << status.ToString();
-                //}
-
-                //rocksdb::Iterator* iter = db_->NewIterator(rocksdb::ReadOptions());
-                //for (; iter->Valid(); iter->Next()) {
-                //    LOG(INFO) << "load key:value " << iter->key().ToString() << ":" << iter->value().ToString();
-                //}
-                //delete iter;
+                std::string sst_file(snapshot_path + "/data.sst");
+                rocksdb::IngestExternalFileOptions ifo;
+                status = db_->IngestExternalFile({sst_file}, ifo);
+                if (!status.ok()) {
+                    LOG(ERROR) << "fail to ingest external file " << status.ToString();
+                    return -1;
+                }
 
                 std::string key{"value"};
                 std::string value_str;
@@ -371,20 +348,13 @@ namespace example {
                 status = db_->Get(rocksdb::ReadOptions(), key, &value_str);
                 if (!status.ok()) {
                     LOG(ERROR) << "fail to get value from rocksdb" << status.ToString();
+                    return -1;
                 } else {
                     LOG(INFO) << "on_snapshot_load data " << value_str;
                 }
 
                 int64_t value = stoll(value_str);
                 _value.store(value, butil::memory_order_relaxed);
-
-                //braft::ProtoBufFile pb_file(snapshot_path);
-                //Snapshot s;
-                //if (pb_file.load(&s) != 0) {
-                //    LOG(ERROR) << "Fail to load snapshot from " << snapshot_path;
-                //    return -1;
-                //}
-                //_value.store(s.value(), butil::memory_order_relaxed);
 
                 return 0;
             }
@@ -443,7 +413,8 @@ namespace example {
                            const ::example::FetchAddRequest* request,
                            ::example::CounterResponse* response,
                            ::google::protobuf::Closure* done) {
-                return _counter->fetch_add(request, response, done);
+                brpc::ClosureGuard done_guard(done);
+                return _counter->fetch_add(request, response, done_guard.release());
             }
             void get(::google::protobuf::RpcController* controller,
                      const ::example::GetRequest* request,

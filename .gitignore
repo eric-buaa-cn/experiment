@@ -1,0 +1,8 @@
+bazel-bin
+bazel-experiment
+bazel-genfiles
+bazel-out
+bazel-testlogs
+src/example/counter/counter_client
+src/example/counter/counter_server
+src/example/counter/runtime/

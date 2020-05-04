@@ -52,3 +52,11 @@ cc_proto_library(
     ],
     visibility = ["//visibility:public"],
 )
+
+cc_binary(
+    name = "sqlparser_example",
+    srcs = ["src/sqlparser_example.cpp"],
+    deps = [
+        "//external:sqlparser",
+    ],
+)

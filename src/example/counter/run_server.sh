@@ -59,6 +59,7 @@ for ((i=0; i<$FLAGS_server_num; ++i)); do
     cp ./counter_server runtime/$i
     cd runtime/$i
     ${VALGRIND} ./counter_server \
+        -log_applied_task\
         -bthread_concurrency=${FLAGS_bthread_concurrency}\
         -raft_max_segment_size=${FLAGS_max_segment_size} \
         -raft_sync=${FLAGS_sync} \

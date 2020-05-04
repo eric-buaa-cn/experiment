@@ -71,6 +71,17 @@ new_http_archive(
 ##  )
 
 new_git_repository(
+    name = "com_github_hyrise_sqlparser",
+    remote = "https://github.com/hyrise/sql-parser.git",
+    build_file = "third-party/sqlparser.BUILD",
+    commit = "a63232533fd446cf8beeb1e3176da73fa41754a0",
+)
+bind(
+    name = "sqlparser",
+    actual = "@com_github_hyrise_sqlparser//:sqlparser",
+)
+
+new_git_repository(
     name = "com_github_facebook_rocksdb",
     remote = "https://github.com/facebook/rocksdb.git",
     build_file = "third-party/rocksdb.BUILD",
