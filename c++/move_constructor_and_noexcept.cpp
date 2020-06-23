@@ -159,9 +159,7 @@ MoveProperties GetProps()
 }
 
 int main()
-{
-    std::cout << "abc" << std::endl;
-   
+{  
 	MoveProperties NoThrowMoveable		= GetProps<NoThrowMoveConstructible>();
 	MoveProperties NoneNoThrowMoveable = GetProps<CantBeNoThrowMoveConstructible>();
 	
